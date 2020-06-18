@@ -284,7 +284,7 @@ resource "aws_instance" "web-1" {
   associate_public_ip_address = true
   source_dest_check           = false
   subnet_id                   = "${aws_subnet.subnet1.id}"
-  depends_on                  = ["aws_db_instance.rds","aws_s3_bucket.s3"]
+  depends_on                  = ["aws_db_instance.rds"]
   iam_instance_profile 		  = "${aws_iam_instance_profile.ec2_instance_profile.name}"
 }
 

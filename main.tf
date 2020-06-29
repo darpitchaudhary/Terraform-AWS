@@ -13,6 +13,11 @@ variable "subnet1" {
   default = "Subnet1"
 }
 
+variable "region" {
+  type    = "string"
+  default = "us-east-1"
+}
+
 variable "subnet2" {
   type    = "string"
   default = "Subnet2"
@@ -28,6 +33,10 @@ variable "internetGateway" {
   default = "InternetGateway"
 }
 
+variable "account_num" {
+  type    = "string"
+  default = "746570542146"
+}
 
 variable "routetableName" {
   type    = "string"
@@ -41,7 +50,7 @@ variable "destination_cidr_block" {
 
 variable "ami_id" {
   type    = "string"
-  default = "ami-0bde76ac38c596eab"
+  default = "ami-0e2d2c081f7e6da9a"
 }
 
 variable "key_name" {
@@ -50,10 +59,10 @@ variable "key_name" {
 }
 
 # Configure the AWS Provider
-provider "aws" {
-  version = "~> 2.0"
-  region  = "us-east-1"
-}
+# provider "aws" {
+#   version = "~> 2.0"
+#   region  = "us-east-1"
+# }
 resource "aws_vpc" "vpc" {
   cidr_block           = "${var.cidr_block_range}"
   enable_dns_support   = true
@@ -231,7 +240,30 @@ resource "aws_db_instance" "rds" {
 }
 resource "aws_s3_bucket" "s3" {
 
-  bucket        = "webapp.darpit.chaudhary"
+  bucket        = "webapp.darpit.chaudhryyi"
+  acl           = "private"
+  force_destroy = true
+
+  lifecycle_rule {
+    enabled = true
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
+  
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+}
+
+resource "aws_s3_bucket" "s3_code_deploy" {
+
+  bucket        = "codedeploy.darpit.chaudharyi.me"
   acl           = "private"
   force_destroy = true
 
@@ -261,10 +293,10 @@ resource "aws_instance" "web-1" {
                       echo export host=${aws_db_instance.rds.address} >> /etc/profile
                       echo export RDS_CONNECTION_STRING=${aws_db_instance.rds.address} >> /etc/profile
                       echo export RDS_USER_NAME=csye6225_su2020 >> /etc/profile
-                      echo export RDS_PASSWORD=thunderstorm_123 >> /etc/profile
+                      echo export RDS_PASSWORD=itscloudcomputing_123 >> /etc/profile
                       echo export RDS_DB_NAME=csye6225 >> /etc/profile
                       echo export PORT=3000 >> /etc/profile
-                      echo export S3_BUCKET_NAME=webapp.darpit.chaudhary >> /etc/profile
+                      echo export S3_BUCKET_NAME=webapp.darpit.chaudhryyi >> /etc/profile
 
 
   EOF
@@ -275,16 +307,15 @@ resource "aws_instance" "web-1" {
     delete_on_termination = "true"
   }
 
-  # iam_instance_profile = "${aws_iam_instance_profile.role1_profile.name}"
-
-
+  tags = {
+    name = "Codedeploy_ec2"
+  }
   
   vpc_security_group_ids = ["${aws_security_group.application.id}"]
 
   associate_public_ip_address = true
   source_dest_check           = false
   subnet_id                   = "${aws_subnet.subnet1.id}"
-  depends_on                  = ["aws_db_instance.rds"]
   iam_instance_profile 		  = "${aws_iam_instance_profile.ec2_instance_profile.name}"
 }
 
@@ -306,34 +337,232 @@ resource "aws_dynamodb_table" "csye6225" {
   }
 }
 
+resource "aws_codedeploy_app" "codedeploy_app" {
+  name = "csye6225-webapp"
+}
 
-resource "aws_iam_role" "ec2_instance_role"{
-  name = "EC2-CSYE6225"
+resource "aws_codedeploy_deployment_group" "codedeploy_deployment_group" {
+  app_name               = "csye6225-webapp"
+  deployment_group_name  = "csye6225-webapp-deployment"
+  deployment_config_name = "CodeDeployDefault.AllAtOnce"
+  service_role_arn      = "${aws_iam_role.codedeploy_service_role.arn}"
 
-  assume_role_policy = <<-EOF
+  ec2_tag_set {
+    ec2_tag_filter {
+      key   = "name"
+      type  = "KEY_AND_VALUE"
+      value = "Codedeploy_ec2"
+    }
+  }
+  deployment_style {
+    deployment_option = "WITHOUT_TRAFFIC_CONTROL"
+    deployment_type   = "IN_PLACE"
+  }
+
+  auto_rollback_configuration {
+    enabled = false
+    events  = ["DEPLOYMENT_FAILURE"]
+  }
+
+}
+
+
+resource "aws_iam_policy" "policy1" {
+  name        = "CircleCI-Upload-To-S3"
+  description = "Upload Policy for user s3  circleci"
+  policy      = <<EOF
 {
-  		"Version": "2012-10-17",
-  		"Statement": [
-    	{
-      		"Action": "sts:AssumeRole",
-      		"Principal": {
-        	"Service": "ec2.amazonaws.com"
-      		},
-      		"Effect": "Allow",
-      		"Sid": ""
-    	}
-  		]
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": [
+            "arn:aws:s3:::codedeploy.darpit.chaudharyi.me",
+            "arn:aws:s3:::codedeploy.darpit.chaudharyi.me/*"
+            ]
+        }
+    ]
 }
-	  EOF
+EOF
+}
+
+resource "aws_iam_policy" "policy2" {
+  name        = "CircleCI-Code-Deploy"
+  description = "Access for user circleci to Instance"
+  policy      = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "codedeploy:RegisterApplicationRevision",
+                "codedeploy:GetApplicationRevision"
+            ],
+            "Resource": [
+                "arn:aws:codedeploy:${var.region}:${var.account_num}:application:csye6225-webapp"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "codedeploy:CreateDeployment",
+                "codedeploy:GetDeployment"
+            ],
+            "Resource": [
+                "*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "codedeploy:GetDeploymentConfig"
+            ],
+            "Resource": [
+                "arn:aws:codedeploy:${var.region}:${var.account_num}:deploymentconfig:CodeDeployDefault.OneAtATime",
+                "arn:aws:codedeploy:${var.region}:${var.account_num}:deploymentconfig:CodeDeployDefault.HalfAtATime",
+                "arn:aws:codedeploy:${var.region}:${var.account_num}:deploymentconfig:CodeDeployDefault.AllAtOnce"
+            ]
+        }
+    ]
+}
+EOF
+}
+
+resource "aws_iam_policy" "policy3" {
+  name        = "circleci-ec2-ami"
+  description = "User circleci access to EC2"
+  policy      = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+      "Effect": "Allow",
+      "Action" : [
+        "ec2:AttachVolume",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CopyImage",
+        "ec2:CreateImage",
+        "ec2:CreateKeypair",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateSnapshot",
+        "ec2:CreateTags",
+        "ec2:CreateVolume",
+        "ec2:DeleteKeyPair",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteSnapshot",
+        "ec2:DeleteVolume",
+        "ec2:DeregisterImage",
+        "ec2:DescribeImageAttribute",
+        "ec2:DescribeImages",
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "ec2:DescribeRegions",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeTags",
+        "ec2:DescribeVolumes",
+        "ec2:DetachVolume",
+        "ec2:GetPasswordData",
+        "ec2:ModifyImageAttribute",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifySnapshotAttribute",
+        "ec2:RegisterImage",
+        "ec2:RunInstances",
+        "ec2:StopInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource" : "*"
+  }]
+}
+EOF
 }
 
 
+resource "aws_iam_policy_attachment" "circleci_attach1" {
+  name  = "circleci_attach1"
+  users = ["circleci"]
+  groups     = ["circleci"]
+  policy_arn = "${aws_iam_policy.policy1.arn}"
+}
 
-resource "aws_iam_role_policy" "new_policy" {
+resource "aws_iam_policy_attachment" "circleci_attach2" {
+  name  = "circleci_attach2"
+  users = ["circleci"]
+  groups     = ["circleci"]
+  policy_arn = "${aws_iam_policy.policy2.arn}"
+}
+
+resource "aws_iam_policy_attachment" "circleci_attach3" {
+  name  = "circleci_attach3"
+  users = ["circleci"]
+  groups     = ["circleci"]
+  policy_arn = "${aws_iam_policy.policy3.arn}"
+}
+
+
+resource "aws_iam_role" "ec2_role" {
+  name = "CodeDeployEC2ServiceRole"
+  depends_on = ["aws_iam_role.codedeploy_service_role"]
+  assume_role_policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": [
+                    "ec2.amazonaws.com"
+                ]
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
+  EOF
+  
+}
+
+
+resource "aws_iam_policy" "ec2_role_policy1" {
+  name        = "CodeDeploy-EC2-S3"
+  description = "Instances read data from S3 buckets"
+  depends_on = ["aws_iam_role.codedeploy_service_role"]
+  policy      = <<EOF
+{
+     "Version": "2012-10-17",
+     "Statement": [
+        {
+            "Action": [
+                "s3:Get*",
+                "s3:List*",
+                "iam:PassRole",
+                "iam:ListInstanceProfiles",
+                "iam:PassRole"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+              "arn:aws:s3:::codedeploy.darpit.chaudharyi.me",
+              "arn:aws:s3:::codedeploy.darpit.chaudharyi.me/*",
+              "arn:aws:iam::${var.account_num}:role/CodeDeployServiceRole"
+              ]
+        }
+    ]
+}
+  EOF
+  
+}
+
+resource "aws_iam_policy" "ec2_role_policy2" {
   name        = "WebAppS3"
-  role = aws_iam_role.ec2_instance_role.id
   policy = <<EOF
-{	
+{ 
     "Version": "2012-10-17",
     "Statement": [
         {
@@ -342,16 +571,78 @@ resource "aws_iam_role_policy" "new_policy" {
             ],
             "Effect": "Allow",
             "Resource": [
-                "arn:aws:s3:::webapp.darpit.chaudhary",
-                "arn:aws:s3:::webapp.darpit.chaudhary/*"
+                "arn:aws:s3:::webapp.darpit.chaudhryyi",
+                "arn:aws:s3:::webapp.darpit.chaudhryyi/*"
             ]
         }
     ]
 }
-	EOF
-	}
+  EOF
+}
 
-resource "aws_iam_instance_profile" "ec2_instance_profile"{
-  name = "ec2_instance_profile"
-  role = "${aws_iam_role.ec2_instance_role.name}"
-  }
+resource "aws_iam_policy_attachment" "ec2_attach1" {
+  name       = "ec2attach1"
+  users      = ["cicd"]
+  roles      = ["${aws_iam_role.ec2_role.name}"]
+  policy_arn = "${aws_iam_policy.ec2_role_policy1.arn}"
+}
+
+
+resource "aws_iam_policy_attachment" "ec2_attach2" {
+  name       = "ec2attach2"
+  users      = ["cicd"]
+  roles      = ["${aws_iam_role.ec2_role.name}"]
+  policy_arn = "${aws_iam_policy.ec2_role_policy2.arn}"
+}
+
+
+
+resource "aws_iam_role" "codedeploy_service_role" {
+  name = "CodeDeployServiceRole"
+  assume_role_policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": [
+                    "codedeploy.amazonaws.com"
+                ]
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
+  EOF
+}
+
+
+resource "aws_iam_role_policy" "codedeploy_policy1" {
+  name        = "codedeploy"
+  role = aws_iam_role.codedeploy_service_role.id
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "ec2:*",
+                "s3:*"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "*"
+            ]
+        }
+    ]
+}
+  EOF
+}
+
+
+resource "aws_iam_instance_profile" "ec2_instance_profile" {
+  name = "new_instance_profile"
+  role = "${aws_iam_role.ec2_role.name}"
+}

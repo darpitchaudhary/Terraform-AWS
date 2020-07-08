@@ -595,7 +595,16 @@ resource "aws_iam_policy_attachment" "ec2_attach2" {
   policy_arn = "${aws_iam_policy.ec2_role_policy2.arn}"
 }
 
+resource "aws_cloudwatch_log_group" "csye6225" {
+  name = "csye6225"
+}
 
+resource "aws_iam_policy_attachment" "ec2_attach3" {
+  name       = "ec2attach3"
+  users      = ["cicd"]
+  roles      = ["${aws_iam_role.ec2_role.name}"]
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
 
 resource "aws_iam_role" "codedeploy_service_role" {
   name = "CodeDeployServiceRole"

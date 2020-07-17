@@ -79,32 +79,6 @@ resource "aws_security_group" "application" {
   name        = "application"
   description = "Allow application ports"
   vpc_id      = "${aws_vpc.vpc.id}"
-
-  ingress {
-    description = "Opening port 443 for HTTPS conncection"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    # cidr_blocks = [aws_vpc.vpc.cidr_block]
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Opening  port 22 for SSH connection"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    # cidr_blocks = [aws_vpc.vpc.cidr_block]
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
-  ingress {
-    description = "Opening  port 80 for Load Balancer"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    # cidr_blocks = [aws_vpc.vpc.cidr_block]
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
   
   ingress {
     description = "Opening port 3000 for Node JS"
@@ -737,7 +711,8 @@ resource "aws_iam_policy" "ec2_role_policy1" {
                 "s3:List*",
                 "iam:PassRole",
                 "iam:ListInstanceProfiles",
-                "iam:PassRole"
+                "iam:PassRole",
+                "autoscaling:*"
             ],
             "Effect": "Allow",
             "Resource": [
@@ -835,7 +810,8 @@ resource "aws_iam_role_policy" "codedeploy_policy1" {
         {
             "Action": [
                 "ec2:*",
-                "s3:*"
+                "s3:*",
+                "autoscaling:*"
             ],
             "Effect": "Allow",
             "Resource": [

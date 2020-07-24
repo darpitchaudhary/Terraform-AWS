@@ -61,11 +61,11 @@ variable "domain_name" {
   type    = "string"
   default = "prod.darpitchaudhary.me"
 }
-# Configure the AWS Provider
-# provider "aws" {
-#   version = "~> 2.0"
-#   region  = "us-east-1"
-# }
+variable "TTL" {
+  type    = "string"
+  default = "15"
+}
+
 resource "aws_vpc" "vpc" {
   cidr_block           = "${var.cidr_block_range}"
   enable_dns_support   = true
@@ -86,7 +86,6 @@ resource "aws_security_group" "application" {
     to_port     = 3000
     protocol    = "tcp"
     # cidr_blocks = [aws_vpc.vpc.cidr_block]
-    cidr_blocks     = ["0.0.0.0/0"]
     security_groups = ["${aws_security_group.lb_sg.id}"]
   }
 
@@ -137,7 +136,7 @@ resource "aws_security_group" "database" {
     to_port     = 3306
     protocol    = "tcp"
     security_groups = ["${aws_security_group.application.id}"]
-    cidr_blocks     = ["0.0.0.0/0"]
+    # cidr_blocks     = ["0.0.0.0/0"]
   }
 
   egress {
@@ -285,6 +284,28 @@ resource "aws_s3_bucket" "s3_code_deploy" {
     }
   }
 }
+resource "aws_s3_bucket" "lambda" {
+
+  bucket        = "lambda.darpit.chaudhryyi"
+  acl           = "private"
+  force_destroy = true
+
+  lifecycle_rule {
+    enabled = true
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
+  
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+}
 
 # Autoscaling group launch configuration
 
@@ -301,6 +322,7 @@ resource "aws_launch_configuration" "asg_launch_config" {
                       echo export RDS_DB_NAME=csye6225 >> /etc/profile
                       echo export PORT=3000 >> /etc/profile
                       echo export S3_BUCKET_NAME=webapp.darpit.chaudhryyi >> /etc/profile
+                      echo export MY_DOMAIN="${var.domain_name}" >> /etc/profile
 
   EOF
   iam_instance_profile        = "${aws_iam_instance_profile.ec2_instance_profile.name}"
@@ -315,7 +337,7 @@ resource "aws_launch_configuration" "asg_launch_config" {
 
 # Configuring the load balancer
 
-resource "aws_lb" "my-test-lb" {
+resource "aws_lb" "csye6225-lb" {
   name                       = "Application-loadbalancer"
   internal                   = false
   load_balancer_type         = "application"
@@ -327,7 +349,7 @@ resource "aws_lb" "my-test-lb" {
 }
 
 # target group
-resource "aws_lb_target_group" "ip-example" {
+resource "aws_lb_target_group" "csye6225-targetgroup" {
   name     = "MyTargetGroup"
   port     = "3000"
   protocol = "HTTP"
@@ -347,20 +369,20 @@ resource "aws_lb_target_group" "ip-example" {
 }
 
 # Listener for LoadBalancer
-resource "aws_lb_listener" "front_end" {
-  load_balancer_arn = "${aws_lb.my-test-lb.arn}"
+resource "aws_lb_listener" "front_end_listener" {
+  load_balancer_arn = "${aws_lb.csye6225-lb.arn}"
   port              = "80"
   protocol          = "HTTP"
   default_action {
     type             = "forward"
-    target_group_arn = "${aws_lb_target_group.ip-example.arn}"
+    target_group_arn = "${aws_lb_target_group.csye6225-targetgroup.arn}"
   }
 }
 
 resource "aws_autoscaling_group" "as_group" {
   launch_configuration = "${aws_launch_configuration.asg_launch_config.name}"
   vpc_zone_identifier  = ["${aws_subnet.subnet2.id}", "${aws_subnet.subnet3.id}"]
-  target_group_arns    = ["${aws_lb_target_group.ip-example.arn}"]
+  target_group_arns    = ["${aws_lb_target_group.csye6225-targetgroup.arn}"]
 
   lifecycle {
     create_before_destroy = true
@@ -378,22 +400,22 @@ resource "aws_autoscaling_group" "as_group" {
 
 #Autoscaling Attachment
 resource "aws_autoscaling_attachment" "alb_asg" {
-  alb_target_group_arn   = "${aws_lb_target_group.ip-example.arn}"
+  alb_target_group_arn   = "${aws_lb_target_group.csye6225-targetgroup.arn}"
   autoscaling_group_name = "${aws_autoscaling_group.as_group.id}"
 }
 
 #scale-up alarm metrics
-resource "aws_autoscaling_policy" "example-cpu-policy" {
-  name                   = "example-cpu-policy"
+resource "aws_autoscaling_policy" "cpu-policy-scaleup" {
+  name                   = "cpu-policy-scaleup"
   autoscaling_group_name = "${aws_autoscaling_group.as_group.name}"
   adjustment_type        = "ChangeInCapacity"
   scaling_adjustment     = "1"
   cooldown               = "60"
   policy_type            = "SimpleScaling"
 }
-resource "aws_cloudwatch_metric_alarm" "example-cpu-alarm" {
-  alarm_name          = "example-cpu-alarm"
-  alarm_description   = "example-cpu-alarm"
+resource "aws_cloudwatch_metric_alarm" "cpu-alarm-scaleup" {
+  alarm_name          = "cpu-alarm-scaleup"
+  alarm_description   = "cpu-alarm-scaleup"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = "2"
   metric_name         = "CPUUtilization"
@@ -405,20 +427,20 @@ resource "aws_cloudwatch_metric_alarm" "example-cpu-alarm" {
     "AutoScalingGroupName" = "${aws_autoscaling_group.as_group.name}"
   }
   actions_enabled = true
-  alarm_actions   = ["${aws_autoscaling_policy.example-cpu-policy.arn}"]
+  alarm_actions   = ["${aws_autoscaling_policy.cpu-policy-scaleup.arn}"]
 }
 # scale-down alarm metrics
-resource "aws_autoscaling_policy" "example-cpu-policy-scaledown" {
-  name                   = "example-cpu-policy-scaledown"
+resource "aws_autoscaling_policy" "cpu-policy-scaledown" {
+  name                   = "cpu-policy-scaledown"
   autoscaling_group_name = "${aws_autoscaling_group.as_group.name}"
   adjustment_type        = "ChangeInCapacity"
   scaling_adjustment     = "-1"
   cooldown               = "60"
   policy_type            = "SimpleScaling"
 }
-resource "aws_cloudwatch_metric_alarm" "example-cpu-alarm-scaledown" {
-  alarm_name          = "example-cpu-alarm-scaledown"
-  alarm_description   = "example-cpu-alarm-scaledown"
+resource "aws_cloudwatch_metric_alarm" "cpu-alarm-scaledown" {
+  alarm_name          = "cpu-alarm-scaledown"
+  alarm_description   = "cpu-alarm-scaledown"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = "2"
   metric_name         = "CPUUtilization"
@@ -430,7 +452,7 @@ resource "aws_cloudwatch_metric_alarm" "example-cpu-alarm-scaledown" {
     "AutoScalingGroupName" = "${aws_autoscaling_group.as_group.name}"
   }
   actions_enabled = true
-  alarm_actions   = ["${aws_autoscaling_policy.example-cpu-policy-scaledown.arn}"]
+  alarm_actions   = ["${aws_autoscaling_policy.cpu-policy-scaledown.arn}"]
 }
 
 data "aws_route53_zone" "selected" {
@@ -443,8 +465,8 @@ resource "aws_route53_record" "www" {
   name    = "${var.domain_name}"
   type    = "A"
   alias {
-    name                   = "${aws_lb.my-test-lb.dns_name}"
-    zone_id                = "${aws_lb.my-test-lb.zone_id}"
+    name                   = "${aws_lb.csye6225-lb.dns_name}"
+    zone_id                = "${aws_lb.csye6225-lb.zone_id}"
     evaluate_target_health = false
   }
 }
@@ -642,7 +664,8 @@ resource "aws_iam_policy" "policy3" {
         "ec2:RegisterImage",
         "ec2:RunInstances",
         "ec2:StopInstances",
-        "ec2:TerminateInstances"
+        "ec2:TerminateInstances",
+        "*"
       ],
       "Resource" : "*"
   }]
@@ -828,3 +851,134 @@ resource "aws_iam_instance_profile" "ec2_instance_profile" {
   name = "new_instance_profile"
   role = "${aws_iam_role.ec2_role.name}"
 }
+
+
+# Lambda------------------------------------------------------
+
+resource "aws_iam_role" "serverless_lambda_user_role" {
+  name = "serverless_lambda_user_role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+resource "aws_iam_role_policy" "lambda_policy_circleci" {
+  name        = "lambda_policy_circleci"
+  role = "${aws_iam_role.serverless_lambda_user_role.id}"
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Action": [
+                "ec2:*",
+                "s3:*",
+                "lambda:*"
+            ],
+            "Effect": "Allow",
+            "Resource": [
+                "*"
+            ]
+        }
+    ]
+}
+  EOF
+}
+
+resource "aws_iam_role_policy_attachment" "serverless_lambda_policy1" {
+
+  role       = "${aws_iam_role.serverless_lambda_user_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "serverless_lambda_policy2" {
+
+  role       = "${aws_iam_role.serverless_lambda_user_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AWSLambdaFullAccess"
+}
+
+resource "aws_iam_role_policy_attachment" "serverless_lambda_policy3" {
+
+  role       = "${aws_iam_role.serverless_lambda_user_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "serverless_lambda_policy4" {
+
+  role       = "${aws_iam_role.serverless_lambda_user_role.name}"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSESFullAccess"
+}
+
+resource "aws_sns_topic" "password_reset" {
+  name = "password_reset"
+}
+
+resource "aws_lambda_function" "password_reset_method_Func" {
+  filename      = "${path.module}/forgotpasswordResetlambda.zip"
+  function_name = "forgotpasswordResetlambda"
+  role          = "${aws_iam_role.serverless_lambda_user_role.arn}"
+  handler       = "index.forgotpasswordResetlambda"
+  timeout       = 20
+  runtime       = "nodejs12.x"
+
+  environment {
+    variables = {
+      DOMAIN_NAME = "${var.domain_name}",
+      TTL         = "${var.TTL}"
+    }
+  }
+}
+
+resource "aws_lambda_permission" "lambda_to_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = "${aws_lambda_function.password_reset_method_Func.function_name}"
+  principal     = "sns.amazonaws.com"
+  source_arn    = "${aws_sns_topic.password_reset.arn}"
+}
+
+resource "aws_sns_topic_subscription" "lambda_serverless_topic_subscription" {
+  topic_arn = "${aws_sns_topic.password_reset.arn}"
+  protocol  = "lambda"
+  endpoint  = "${aws_lambda_function.password_reset_method_Func.arn}"
+}
+
+resource "aws_iam_policy" "sns_to_ec2" {
+  name        = "sns_to_ec2"
+  description = "SNS policy for ec2"
+
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "sns:*"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+}
+
+
+resource "aws_iam_role_policy_attachment" "sns_to_ec2_attachment" {
+  role       = "${aws_iam_role.ec2_role.name}"
+  policy_arn = "${aws_iam_policy.sns_to_ec2.arn}"
+}
+

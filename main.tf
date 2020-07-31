@@ -109,8 +109,8 @@ resource "aws_security_group" "lb_sg" {
   description = "Allow ALB inbound traffic"
 
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -237,7 +237,7 @@ resource "aws_db_instance" "rds" {
   vpc_security_group_ids = ["${aws_security_group.database.id}"]
   skip_final_snapshot    = true
   publicly_accessible    = false
-
+  storage_encrypted      = true
 }
 resource "aws_s3_bucket" "s3" {
 
@@ -368,11 +368,23 @@ resource "aws_lb_target_group" "csye6225-targetgroup" {
   }
 }
 
+# # Listener for LoadBalancer
+# resource "aws_lb_listener" "front_end_listener" {
+#   load_balancer_arn = "${aws_lb.csye6225-lb.arn}"
+#   port              = "80"
+#   protocol          = "HTTP"
+#   default_action {
+#     type             = "forward"
+#     target_group_arn = "${aws_lb_target_group.csye6225-targetgroup.arn}"
+#   }
+# }
 # Listener for LoadBalancer
-resource "aws_lb_listener" "front_end_listener" {
+resource "aws_lb_listener" "ssl" {
   load_balancer_arn = "${aws_lb.csye6225-lb.arn}"
-  port              = "80"
-  protocol          = "HTTP"
+  port              = "443"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:us-east-1:746570542146:certificate/7157b614-94e6-489a-abd0-321d4f8aa8e5"
   default_action {
     type             = "forward"
     target_group_arn = "${aws_lb_target_group.csye6225-targetgroup.arn}"
@@ -549,6 +561,19 @@ resource "aws_codedeploy_deployment_group" "codedeploy_deployment_group" {
   auto_rollback_configuration {
     enabled = false
     events  = ["DEPLOYMENT_FAILURE"]
+  }
+
+  load_balancer_info {
+    target_group_pair_info {
+      prod_traffic_route {
+        listener_arns = ["${aws_lb_listener.ssl.arn}"]
+      }
+
+      target_group {
+        name = "${aws_lb_target_group.csye6225-targetgroup.name}"
+      }
+
+    }
   }
 
   autoscaling_groups = ["${aws_autoscaling_group.as_group.name}"]

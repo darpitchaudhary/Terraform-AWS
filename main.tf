@@ -89,6 +89,13 @@ resource "aws_security_group" "application" {
     security_groups = ["${aws_security_group.lb_sg.id}"]
   }
 
+  ingress {
+    description = "Opening port 22 for Node JS"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
    egress {
     from_port   = 0
     to_port     = 0
@@ -238,6 +245,7 @@ resource "aws_db_instance" "rds" {
   skip_final_snapshot    = true
   publicly_accessible    = false
   storage_encrypted      = true
+  parameter_group_name   = "${aws_db_parameter_group.db-sslcheck.name}"
 }
 resource "aws_s3_bucket" "s3" {
 
@@ -1005,5 +1013,15 @@ EOF
 resource "aws_iam_role_policy_attachment" "sns_to_ec2_attachment" {
   role       = "${aws_iam_role.ec2_role.name}"
   policy_arn = "${aws_iam_policy.sns_to_ec2.arn}"
+}
+
+resource "aws_db_parameter_group" "db-sslcheck" {
+  name       = "db-sslcheck"
+  family     = "mysql5.7"
+  parameter{
+    name = "performance_schema"
+    value = "1"
+    apply_method="pending-reboot"
+  }
 }
 
